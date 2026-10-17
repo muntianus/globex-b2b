@@ -61,7 +61,7 @@ test('GET /api/v1/catalog returns 15 seeded industrial B2B SKUs and supports cat
     assert.equal(vatRes.status, 200);
     const vatBody = await vatRes.json();
     assert.equal(vatBody.count, 14);
-    assert.ok(vatBody.items.every((item) => item.vatEligible === true && item.vatRate === 0.2));
+    assert.ok(vatBody.items.every((item) => item.vatEligible === true && item.vatRate === 0.22));
   });
 });
 
@@ -90,6 +90,8 @@ test('POST /api/v1/catalog creates a new B2B SKU and persists to catalog', async
     assert.equal(createdBody.status, 'created');
     assert.equal(createdBody.item.sku, 'GLX-PUMP-IND-900');
     assert.equal(createdBody.item.priceNet, 750000);
+    assert.equal(createdBody.item.vatRate, 0.22);
+    assert.equal(createdBody.item.priceGrossVat22, 915000);
     assert.equal(createdBody.item.priceGrossVat20, 900000);
     assert.equal(createdBody.item.availableStock, 20);
 
@@ -118,7 +120,7 @@ test('POST /api/v1/catalog creates a new B2B SKU and persists to catalog', async
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('POST /api/v1/orders/reserve validates INN, computes 20% VAT, generates ST00012 QR, and deducts stock', async () => {
+test('POST /api/v1/orders/reserve validates INN, computes 22% VAT (default OSNO_22), generates ST00012 QR, and deducts stock', async () => {
   await withTestServer({}, async (baseUrl) => {
     // 1. Reject invalid INN
     const badInnRes = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
@@ -132,7 +134,7 @@ test('POST /api/v1/orders/reserve validates INN, computes 20% VAT, generates ST0
     });
     assert.equal(badInnRes.status, 400);
 
-    // 2. Reserve valid order (10 tons of 09G2S pipe @ 118,500 RUB/t net)
+    // 2. Reserve valid order (10 tons of 09G2S pipe @ 118,500 RUB/t net) with default 22% VAT (OSNO_22)
     const reserveRes = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -148,14 +150,18 @@ test('POST /api/v1/orders/reserve validates INN, computes 20% VAT, generates ST0
 
     assert.equal(reserveBody.status, 'reserved');
     assert.equal(reserveBody.buyerInn, '7707083893');
-    // 10 * 118,500 = 1,185,000 net; 20% VAT = 237,000; gross = 1,422,000
+    // 10 * 118,500 = 1,185,000 net; 22% VAT = 260,700; gross = 1,445,700
+    assert.equal(reserveBody.pricing.vatRegime, 'OSNO_22');
+    assert.equal(reserveBody.pricing.vatRate, 0.22);
+    assert.equal(reserveBody.pricing.vatPercent, 22);
     assert.equal(reserveBody.pricing.amountNet, 1185000);
-    assert.equal(reserveBody.pricing.vatAmount, 237000);
-    assert.equal(reserveBody.pricing.amountTotal, 1422000);
+    assert.equal(reserveBody.pricing.vatAmount, 260700);
+    assert.equal(reserveBody.pricing.amountTotal, 1445700);
 
-    // Verify GOST R 56042-2014 ST00012 payment QR string
+    // Verify GOST R 56042-2014 ST00012 payment QR string contains 22% VAT and correct kopeck sum
     assert.ok(reserveBody.paymentQr.startsWith('ST00012|'));
-    assert.ok(reserveBody.paymentQr.includes('Sum=142200000'));
+    assert.ok(reserveBody.paymentQr.includes('Sum=144570000'));
+    assert.ok(reserveBody.paymentQr.includes('в т.ч. НДС 22%'));
     assert.ok(reserveBody.paymentQr.includes('PayerINN=7707083893'));
     assert.ok(reserveBody.order.m15Requisition.stockLocked);
     assert.ok(reserveBody.order.m15Requisition.documentNumber.startsWith('M15-'));
@@ -172,6 +178,94 @@ test('POST /api/v1/orders/reserve validates INN, computes 20% VAT, generates ST0
     const ordersBody = await ordersRes.json();
     assert.equal(ordersBody.count, 1);
     assert.equal(ordersBody.orders[0].orderId, reserveBody.orderId);
+  });
+});
+
+test('POST /api/v1/orders/reserve supports optional vat_regime (USN_7, USN_5, EXPORT_0) and validates invalid regimes', async () => {
+  await withTestServer({}, async (baseUrl) => {
+    // 1. USN_7 regime (7% VAT)
+    const usn7Res = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyerInn: '7707083893',
+        sku: 'GLX-PIPE-09G2S-159',
+        quantity: 10,
+        vat_regime: 'USN_7',
+      }),
+    });
+    assert.equal(usn7Res.status, 201);
+    const usn7Body = await usn7Res.json();
+    // 10 * 118,500 = 1,185,000 net; 7% VAT = 82,950; gross = 1,267,950
+    assert.equal(usn7Body.pricing.vatRegime, 'USN_7');
+    assert.equal(usn7Body.pricing.vatRate, 0.07);
+    assert.equal(usn7Body.pricing.vatPercent, 7);
+    assert.equal(usn7Body.pricing.amountNet, 1185000);
+    assert.equal(usn7Body.pricing.vatAmount, 82950);
+    assert.equal(usn7Body.pricing.amountTotal, 1267950);
+    assert.ok(usn7Body.paymentQr.includes('Sum=126795000'));
+    assert.ok(usn7Body.paymentQr.includes('в т.ч. НДС 7%'));
+
+    // 2. USN_5 regime (5% VAT)
+    const usn5Res = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyerInn: '7707083893',
+        sku: 'GLX-PIPE-09G2S-159',
+        quantity: 5,
+        vat_regime: 'USN_5',
+      }),
+    });
+    assert.equal(usn5Res.status, 201);
+    const usn5Body = await usn5Res.json();
+    // 5 * 118,500 = 592,500 net; 5% VAT = 29,625; gross = 622,125
+    assert.equal(usn5Body.pricing.vatRegime, 'USN_5');
+    assert.equal(usn5Body.pricing.vatRate, 0.05);
+    assert.equal(usn5Body.pricing.vatPercent, 5);
+    assert.equal(usn5Body.pricing.amountNet, 592500);
+    assert.equal(usn5Body.pricing.vatAmount, 29625);
+    assert.equal(usn5Body.pricing.amountTotal, 622125);
+    assert.ok(usn5Body.paymentQr.includes('Sum=62212500'));
+    assert.ok(usn5Body.paymentQr.includes('в т.ч. НДС 5%'));
+
+    // 3. EXPORT_0 regime (0% VAT)
+    const exportRes = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyerInn: '7707083893',
+        sku: 'GLX-PIPE-09G2S-159',
+        quantity: 5,
+        vat_regime: 'EXPORT_0',
+      }),
+    });
+    assert.equal(exportRes.status, 201);
+    const exportBody = await exportRes.json();
+    // 5 * 118,500 = 592,500 net; 0% VAT = 0; gross = 592,500
+    assert.equal(exportBody.pricing.vatRegime, 'EXPORT_0');
+    assert.equal(exportBody.pricing.vatRate, 0.0);
+    assert.equal(exportBody.pricing.vatPercent, 0);
+    assert.equal(exportBody.pricing.amountNet, 592500);
+    assert.equal(exportBody.pricing.vatAmount, 0);
+    assert.equal(exportBody.pricing.amountTotal, 592500);
+    assert.ok(exportBody.paymentQr.includes('Sum=59250000'));
+    assert.ok(exportBody.paymentQr.includes('без НДС (НДС 0%)'));
+
+    // 4. Reject invalid vat_regime
+    const badRegimeRes = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyerInn: '7707083893',
+        sku: 'GLX-PIPE-09G2S-159',
+        quantity: 1,
+        vat_regime: 'INVALID_TAX_REGIME',
+      }),
+    });
+    assert.equal(badRegimeRes.status, 400);
+    const badRegimeBody = await badRegimeRes.json();
+    assert.equal(badRegimeBody.error, 'INVALID_VAT_REGIME');
   });
 });
 

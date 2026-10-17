@@ -12,6 +12,57 @@ export const SUPPLIER_REQUISITES = Object.freeze({
   correspAcc: '30101810400000000225',
 });
 
+export const VAT_REGIMES = Object.freeze({
+  OSNO_22: Object.freeze({
+    code: 'OSNO_22',
+    rate: 0.22,
+    percent: 22,
+    name: 'ОСНО (НДС 22%)',
+    description: 'Общая система налогообложения — ставка НДС 22% (налоговая реформа 2026)',
+  }),
+  USN_7: Object.freeze({
+    code: 'USN_7',
+    rate: 0.07,
+    percent: 7,
+    name: 'УСН (НДС 7%)',
+    description: 'Упрощенная система налогообложения — специальная ставка НДС 7%',
+  }),
+  USN_5: Object.freeze({
+    code: 'USN_5',
+    rate: 0.05,
+    percent: 5,
+    name: 'УСН (НДС 5%)',
+    description: 'Упрощенная система налогообложения — специальная ставка НДС 5%',
+  }),
+  EXPORT_0: Object.freeze({
+    code: 'EXPORT_0',
+    rate: 0.00,
+    percent: 0,
+    name: 'Экспорт (НДС 0%)',
+    description: 'Экспортные операции / нулевая ставка НДС 0%',
+  }),
+});
+
+export const DEFAULT_VAT_REGIME = 'OSNO_22';
+export const DEFAULT_VAT_RATE = 0.22;
+
+export function resolveVatRegime(regimeInput) {
+  if (!regimeInput) {
+    return VAT_REGIMES[DEFAULT_VAT_REGIME];
+  }
+  const key = String(regimeInput).trim().toUpperCase();
+  const found = VAT_REGIMES[key];
+  if (!found) {
+    const err = new Error(
+      `Invalid vat_regime "${regimeInput}". Allowed values: ${Object.keys(VAT_REGIMES).join(', ')}`
+    );
+    err.statusCode = 400;
+    err.code = 'INVALID_VAT_REGIME';
+    throw err;
+  }
+  return found;
+}
+
 export const SEED_SKUS = Object.freeze([
   {
     sku: 'GLX-CNC-500X',
@@ -19,7 +70,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'cnc_machinery',
     unit: 'шт',
     priceNet: 4850000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 14,
     reserved: 2,
@@ -34,7 +85,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'cnc_machinery',
     unit: 'шт',
     priceNet: 6200000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 9,
     reserved: 1,
@@ -49,7 +100,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'cnc_machinery',
     unit: 'шт',
     priceNet: 3900000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 11,
     reserved: 0,
@@ -64,7 +115,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'rolled_metal',
     unit: 'т',
     priceNet: 118500,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 420,
     reserved: 35,
@@ -79,7 +130,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'rolled_metal',
     unit: 'т',
     priceNet: 124000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 310,
     reserved: 20,
@@ -94,7 +145,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'rolled_metal',
     unit: 'т',
     priceNet: 132000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 260,
     reserved: 15,
@@ -109,7 +160,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'power_equipment',
     unit: 'шт',
     priceNet: 980000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 28,
     reserved: 3,
@@ -124,7 +175,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'power_equipment',
     unit: 'шт',
     priceNet: 1840000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 16,
     reserved: 2,
@@ -139,7 +190,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'power_equipment',
     unit: 'компл',
     priceNet: 1490000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 12,
     reserved: 1,
@@ -154,7 +205,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'server_infrastructure',
     unit: 'шт',
     priceNet: 89500,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 95,
     reserved: 10,
@@ -169,7 +220,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'server_infrastructure',
     unit: 'шт',
     priceNet: 54000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 150,
     reserved: 12,
@@ -184,7 +235,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'server_infrastructure',
     unit: 'шт',
     priceNet: 365000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 34,
     reserved: 4,
@@ -199,7 +250,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'polymers',
     unit: 'т',
     priceNet: 146000,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 540,
     reserved: 40,
@@ -214,7 +265,7 @@ export const SEED_SKUS = Object.freeze([
     category: 'polymers',
     unit: 'т',
     priceNet: 138500,
-    vatRate: 0.20,
+    vatRate: 0.22,
     vatEligible: true,
     stock: 610,
     reserved: 55,
@@ -265,30 +316,40 @@ export function validateInn(inn) {
   };
 }
 
-export function calculateVat20(priceNet, quantity = 1) {
+export function calculateVat(priceNet, quantity = 1, vatRate = DEFAULT_VAT_RATE) {
   const unitNet = roundMoney(priceNet);
   const qty = Number(quantity);
+  const rate = Number(vatRate);
   const amountNet = roundMoney(unitNet * qty);
-  const vatAmount = roundMoney(amountNet * 0.20);
+  const vatAmount = roundMoney(amountNet * rate);
   const amountTotal = roundMoney(amountNet + vatAmount);
   return {
     unitPriceNet: unitNet,
     quantity: qty,
-    vatRate: 0.20,
-    vatPercent: 20,
+    vatRate: rate,
+    vatPercent: Math.round(rate * 100),
     amountNet,
     vatAmount,
     amountTotal,
   };
 }
 
-export function buildGostPaymentQr({ orderId, buyerInn, amountTotal, purpose }) {
+export function calculateVat22(priceNet, quantity = 1) {
+  return calculateVat(priceNet, quantity, 0.22);
+}
+
+export function calculateVat20(priceNet, quantity = 1) {
+  return calculateVat(priceNet, quantity, 0.20);
+}
+
+export function buildGostPaymentQr({ orderId, buyerInn, amountTotal, purpose, vatPercent = 22 }) {
   // GOST R 56042-2014 payment order QR format (ST00012)
   // Sum in kopecks per GOST R 56042-2014 specification
   const sumKopecks = Math.round(roundMoney(amountTotal) * 100);
+  const vatDescription = vatPercent > 0 ? `в т.ч. НДС ${vatPercent}%` : 'без НДС (НДС 0%)';
   const paymentPurpose =
     purpose ||
-    `Оплата по заказу ${orderId} (накладная М-15), в т.ч. НДС 20%. Покупатель ИНН ${buyerInn}`;
+    `Оплата по заказу ${orderId} (накладная М-15), ${vatDescription}. Покупатель ИНН ${buyerInn}`;
 
   return [
     'ST00012',
@@ -308,11 +369,18 @@ export function buildGostPaymentQr({ orderId, buyerInn, amountTotal, purpose }) 
 
 function enrichSku(raw) {
   const availableStock = Math.max(0, Number(raw.stock));
-  const vatCalc = calculateVat20(raw.priceNet, 1);
+  const vatRate =
+    raw.vatEligible === false
+      ? 0.0
+      : raw.vatRate !== undefined
+      ? Number(raw.vatRate)
+      : DEFAULT_VAT_RATE;
+  const vatCalc = calculateVat(raw.priceNet, 1, vatRate);
   return {
     ...raw,
     availableStock,
-    priceGrossVat20: vatCalc.amountTotal,
+    priceGrossVat22: vatCalc.amountTotal,
+    priceGrossVat20: roundMoney(raw.priceNet * 1.20),
     vatUnitAmount: vatCalc.vatAmount,
   };
 }
@@ -442,7 +510,7 @@ export class CatalogStore {
     }
 
     const vatRate =
-      payload.vatRate !== undefined ? Number(payload.vatRate) : 0.20;
+      payload.vatRate !== undefined ? Number(payload.vatRate) : DEFAULT_VAT_RATE;
     const vatEligible =
       payload.vatEligible !== undefined
         ? Boolean(payload.vatEligible)
@@ -479,6 +547,8 @@ export class CatalogStore {
       err.code = 'INVALID_INN';
       throw err;
     }
+
+    const regime = resolveVatRegime(payload.vat_regime ?? payload.vatRegime);
 
     const linesInput = Array.isArray(payload.items)
       ? payload.items
@@ -526,7 +596,7 @@ export class CatalogStore {
       validatedLines.push({ record, qty });
     }
 
-    // Second pass: lock warehouse stock and calculate totals with 20% VAT
+    // Second pass: lock warehouse stock and calculate totals with selected VAT regime (default: 22%)
     let totalNet = 0;
     let totalVat = 0;
     let totalGross = 0;
@@ -536,7 +606,8 @@ export class CatalogStore {
       record.stock -= qty;
       record.reserved += qty;
 
-      const calc = calculateVat20(record.priceNet, qty);
+      const itemRate = record.vatEligible === false ? 0.0 : regime.rate;
+      const calc = calculateVat(record.priceNet, qty, itemRate);
       totalNet = roundMoney(totalNet + calc.amountNet);
       totalVat = roundMoney(totalVat + calc.vatAmount);
       totalGross = roundMoney(totalGross + calc.amountTotal);
@@ -549,7 +620,9 @@ export class CatalogStore {
         gost: record.gost,
         quantity: qty,
         unitPriceNet: calc.unitPriceNet,
-        vatRate: 0.20,
+        vatRegime: regime.code,
+        vatRate: itemRate,
+        vatPercent: calc.vatPercent,
         amountNet: calc.amountNet,
         vatAmount: calc.vatAmount,
         amountTotal: calc.amountTotal,
@@ -567,6 +640,7 @@ export class CatalogStore {
       orderId,
       buyerInn: innCheck.inn,
       amountTotal: totalGross,
+      vatPercent: regime.percent,
     });
 
     const order = {
@@ -587,8 +661,9 @@ export class CatalogStore {
       items: reservedItems,
       pricing: {
         currency: 'RUB',
-        vatRate: 0.20,
-        vatPercent: 20,
+        vatRegime: regime.code,
+        vatRate: regime.rate,
+        vatPercent: regime.percent,
         amountNet: totalNet,
         vatAmount: totalVat,
         amountTotal: totalGross,

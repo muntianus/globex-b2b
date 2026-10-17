@@ -20,7 +20,7 @@ export const FALLBACK_ENTERPRISE_OVERVIEW = Object.freeze({
   openTenders: 64,
   settlementStandard: 'GOST R 56042-2014 (ST00012)',
   warehouseStandard: 'OKUD 0315007 (M-15)',
-  vatPolicy: 'RU_NDS_20_PERCENT',
+  vatPolicy: 'RU_NDS_22_PERCENT',
 });
 
 export class GlobexBridge {

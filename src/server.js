@@ -14,7 +14,7 @@ export function buildOpenApiSpec(baseUrl = 'http://localhost:4010') {
       title: 'Globex B2B Inventory, Order & Ecosystem SLO Sync API',
       version: SERVICE_VERSION,
       description:
-        'High-throughput B2B e-commerce catalog, M-15 warehouse stock reservation, VAT 20% calculation, GOST ST00012 payment QR generation, and live ecosystem SLO bridge for globlex.pro, globlex.shop, globlex.online, launchgate-core, and aco.perfops.shop.',
+        'High-throughput B2B e-commerce catalog, M-15 warehouse stock reservation, 2026 Russian VAT 22% calculation (with optional vat_regime: OSNO_22, USN_7, USN_5, EXPORT_0), GOST ST00012 payment QR generation, and live ecosystem SLO bridge for globlex.pro, globlex.shop, globlex.online, launchgate-core, and aco.perfops.shop.',
       contact: {
         name: 'PerfOps Engineering',
         url: 'https://globlex.pro',
@@ -66,7 +66,7 @@ export function buildOpenApiSpec(baseUrl = 'http://localhost:4010') {
         post: {
           operationId: 'reserveOrderStock',
           summary:
-            'Validate buyer INN (10/12 digits), lock M-15 warehouse stock, compute 20% VAT, and issue GOST R 56042-2014 ST00012 QR payload',
+            'Validate buyer INN (10/12 digits), lock M-15 warehouse stock, compute 22% VAT (or optional vat_regime: OSNO_22, USN_7, USN_5, EXPORT_0), and issue GOST R 56042-2014 ST00012 QR payload',
           responses: {
             '201': { description: 'Stock reserved and M-15 order generated' },
             '400': { description: 'Invalid INN or order payload' },
