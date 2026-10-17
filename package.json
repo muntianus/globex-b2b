@@ -2,5 +2,15 @@
   "name": "globex-b2b",
   "version": "1.2.0",
   "private": true,
-  "description": "High-throughput B2B e-commerce & inventory catalog platform"
+  "type": "module",
+  "description": "High-throughput B2B e-commerce, M-15 warehouse stock reservation & ecosystem SLO sync microservice for Globex (globlex.pro / globlex.shop / globlex.online)",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test tests/*.test.js",
+    "smoke": "node --test tests/globex-b2b.test.js"
+  }
 }
