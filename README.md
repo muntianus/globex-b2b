@@ -79,3 +79,7 @@ npm run smoke
 # Start HTTP server (default port 4010)
 npm start
 ```
+
+## PerfOps ecosystem contact
+
+General PerfOps engineering contact: [@perfops_ai_manager](https://t.me/perfops_ai_manager). Product-specific operational alerts, trading bots, private credentials and vulnerability reports continue to use their existing dedicated channels.
