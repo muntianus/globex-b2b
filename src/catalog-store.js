@@ -537,6 +537,38 @@ export class CatalogStore {
     return enrichSku(record);
   }
 
+  /**
+   * Atomically validates aggregated per-SKU demand against warehouse balances
+   * and locks the stock. The check and the writes run in one synchronous block
+   * (no await in between), so a failed line rejects the whole order and a
+   * competing reservation cannot observe or reuse the same balance.
+   */
+  #lockStock(demandBySku) {
+    const shortages = [];
+    for (const [sku, { record, qty, lineCount }] of demandBySku) {
+      if (qty > record.stock) {
+        shortages.push({ sku, requested: qty, available: record.stock, lineCount });
+      }
+    }
+
+    if (shortages.length > 0) {
+      const [first] = shortages;
+      const lineNote = first.lineCount > 1 ? ` across ${first.lineCount} lines` : '';
+      const err = new Error(
+        `Insufficient available stock for ${first.sku}: requested ${first.requested}${lineNote}, available ${first.available}`
+      );
+      err.statusCode = 409;
+      err.code = 'INSUFFICIENT_STOCK';
+      err.details = { shortages };
+      throw err;
+    }
+
+    for (const { record, qty } of demandBySku.values()) {
+      record.stock -= qty;
+      record.reserved += qty;
+    }
+  }
+
   reserveOrder(payload = {}) {
     const buyerInn = payload.buyerInn ?? payload.inn;
     const buyerName = String(payload.buyerName || 'ООО "КОНТРАГЕНТ Б2Б"').trim();
@@ -563,8 +595,8 @@ export class CatalogStore {
       throw err;
     }
 
-    // First pass: validate all items and stock availability atomically
-    const validatedLines = [];
+    // Pass 1 (read-only): validate line shape and resolve catalog records.
+    const resolvedLines = [];
     for (const line of linesInput) {
       const skuCode = String(line.sku || '').trim();
       const qty = Number(line.quantity);
@@ -583,53 +615,61 @@ export class CatalogStore {
         throw err;
       }
 
-      const available = record.stock;
-      if (qty > available) {
-        const err = new Error(
-          `Insufficient available stock for ${skuCode}: requested ${qty}, available ${available}`
-        );
-        err.statusCode = 409;
-        err.code = 'INSUFFICIENT_STOCK';
-        throw err;
-      }
-
-      validatedLines.push({ record, qty });
+      resolvedLines.push({ record, qty });
     }
 
-    // Second pass: lock warehouse stock and calculate totals with selected VAT regime (default: 22%)
+    // Pass 2 (read-only): aggregate demand per SKU. Duplicate lines must be
+    // summed before the stock check, otherwise each line is validated against
+    // the same untouched balance and the order can oversell the warehouse.
+    const demandBySku = new Map();
+    for (const { record, qty } of resolvedLines) {
+      const existing = demandBySku.get(record.sku);
+      if (existing) {
+        existing.qty += qty;
+        existing.lineCount += 1;
+      } else {
+        demandBySku.set(record.sku, { record, qty, lineCount: 1 });
+      }
+    }
+
+    // Pass 3 (pure): price the aggregated demand before any mutation, so a
+    // pricing failure cannot leave stock locked without an order.
     let totalNet = 0;
     let totalVat = 0;
     let totalGross = 0;
-    const reservedItems = [];
+    const pricedItems = [];
 
-    for (const { record, qty } of validatedLines) {
-      record.stock -= qty;
-      record.reserved += qty;
-
+    for (const { record, qty } of demandBySku.values()) {
       const itemRate = record.vatEligible === false ? 0.0 : regime.rate;
       const calc = calculateVat(record.priceNet, qty, itemRate);
       totalNet = roundMoney(totalNet + calc.amountNet);
       totalVat = roundMoney(totalVat + calc.vatAmount);
       totalGross = roundMoney(totalGross + calc.amountTotal);
-
-      reservedItems.push({
-        sku: record.sku,
-        name: record.name,
-        unit: record.unit,
-        warehouse: record.warehouse,
-        gost: record.gost,
-        quantity: qty,
-        unitPriceNet: calc.unitPriceNet,
-        vatRegime: regime.code,
-        vatRate: itemRate,
-        vatPercent: calc.vatPercent,
-        amountNet: calc.amountNet,
-        vatAmount: calc.vatAmount,
-        amountTotal: calc.amountTotal,
-        remainingStock: record.stock,
-        lockedReserved: record.reserved,
-      });
+      pricedItems.push({ record, qty, itemRate, calc });
     }
+
+    // Pass 4 (critical section): validate every aggregated SKU against stock and
+    // lock it in one synchronous block. There is no await between the check and
+    // the writes, so a competing reservation cannot interleave and oversell.
+    this.#lockStock(demandBySku);
+
+    const reservedItems = pricedItems.map(({ record, qty, itemRate, calc }) => ({
+      sku: record.sku,
+      name: record.name,
+      unit: record.unit,
+      warehouse: record.warehouse,
+      gost: record.gost,
+      quantity: qty,
+      unitPriceNet: calc.unitPriceNet,
+      vatRegime: regime.code,
+      vatRate: itemRate,
+      vatPercent: calc.vatPercent,
+      amountNet: calc.amountNet,
+      vatAmount: calc.vatAmount,
+      amountTotal: calc.amountTotal,
+      remainingStock: record.stock,
+      lockedReserved: record.reserved,
+    }));
 
     this.m15Counter += 1;
     const orderId = `GLX-ORD-${this.m15Counter}`;
@@ -676,7 +716,18 @@ export class CatalogStore {
     };
 
     this.orders.unshift(order);
-    this.#persist();
+    try {
+      this.#persist();
+    } catch (persistErr) {
+      // Roll the in-memory lock back so stock never diverges from durable state.
+      this.orders.shift();
+      this.m15Counter -= 1;
+      for (const { record, qty } of demandBySku.values()) {
+        record.stock += qty;
+        record.reserved -= qty;
+      }
+      throw persistErr;
+    }
     return order;
   }
 
