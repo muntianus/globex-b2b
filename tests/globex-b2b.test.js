@@ -181,6 +181,130 @@ test('POST /api/v1/orders/reserve validates INN, computes 22% VAT (default OSNO_
   });
 });
 
+test('POST /api/v1/orders/reserve aggregates duplicate SKU lines before the stock check', async () => {
+  await withTestServer({}, async (baseUrl) => {
+    // GLX-CNC-500X seeds with stock 14. Two lines of 8 = 16 > 14 must be rejected
+    // atomically: no stock deducted, no order persisted.
+    const oversellRes = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyerInn: '7707083893',
+        items: [
+          { sku: 'GLX-CNC-500X', quantity: 8 },
+          { sku: 'GLX-CNC-500X', quantity: 8 },
+        ],
+      }),
+    });
+    assert.equal(oversellRes.status, 409);
+    const oversellBody = await oversellRes.json();
+    assert.equal(oversellBody.error, 'INSUFFICIENT_STOCK');
+    assert.match(oversellBody.message, /requested 16 across 2 lines/);
+    assert.match(oversellBody.message, /available 14/);
+
+    const ordersBody = await (await fetch(`${baseUrl}/api/v1/orders`)).json();
+    assert.equal(ordersBody.count, 0);
+
+    let catalogBody = await (
+      await fetch(`${baseUrl}/api/v1/catalog?search=GLX-CNC-500X`)
+    ).json();
+    assert.equal(catalogBody.items[0].stock, 14);
+    assert.equal(catalogBody.items[0].reserved, 2);
+    assert.equal(catalogBody.items[0].availableStock, 14);
+
+    // Mixed order: a valid SKU must not be locked when another SKU fails the check.
+    const mixedRes = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyerInn: '7707083893',
+        items: [
+          { sku: 'GLX-PIPE-09G2S-159', quantity: 5 },
+          { sku: 'GLX-CNC-500X', quantity: 8 },
+          { sku: 'GLX-CNC-500X', quantity: 8 },
+        ],
+      }),
+    });
+    assert.equal(mixedRes.status, 409);
+
+    catalogBody = await (
+      await fetch(`${baseUrl}/api/v1/catalog?search=GLX-PIPE-09G2S-159`)
+    ).json();
+    assert.equal(catalogBody.items[0].stock, 420);
+    assert.equal(catalogBody.items[0].reserved, 35);
+
+    catalogBody = await (
+      await fetch(`${baseUrl}/api/v1/catalog?search=GLX-CNC-500X`)
+    ).json();
+    assert.equal(catalogBody.items[0].stock, 14);
+    assert.equal(catalogBody.items[0].reserved, 2);
+  });
+});
+
+test('POST /api/v1/orders/reserve merges duplicate SKU lines and deducts the summed quantity', async () => {
+  await withTestServer({}, async (baseUrl) => {
+    // 5 + 4 = 9 units of GLX-CNC-500X, within the seeded stock of 14.
+    const res = await fetch(`${baseUrl}/api/v1/orders/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyerInn: '7707083893',
+        items: [
+          { sku: 'GLX-CNC-500X', quantity: 5 },
+          { sku: 'GLX-CNC-500X', quantity: 4 },
+        ],
+      }),
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+
+    assert.equal(body.order.items.length, 1);
+    assert.equal(body.order.items[0].sku, 'GLX-CNC-500X');
+    assert.equal(body.order.items[0].quantity, 9);
+    // 9 * 4,850,000 = 43,650,000 net; 22% VAT = 9,603,000; gross = 53,253,000
+    assert.equal(body.pricing.amountNet, 43650000);
+    assert.equal(body.pricing.vatAmount, 9603000);
+    assert.equal(body.pricing.amountTotal, 53253000);
+
+    const catalogBody = await (
+      await fetch(`${baseUrl}/api/v1/catalog?search=GLX-CNC-500X`)
+    ).json();
+    assert.equal(catalogBody.items[0].stock, 5);
+    assert.equal(catalogBody.items[0].reserved, 11);
+  });
+});
+
+test('POST /api/v1/orders/reserve serializes concurrent reservations without overselling', async () => {
+  await withTestServer({}, async (baseUrl) => {
+    // Stock 14, five concurrent requests of 4 units each -> exactly three fit.
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        fetch(`${baseUrl}/api/v1/orders/reserve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            buyerInn: '7707083893',
+            sku: 'GLX-CNC-500X',
+            quantity: 4,
+          }),
+        })
+      )
+    );
+
+    const statuses = responses.map((response) => response.status).sort();
+    assert.deepEqual(statuses, [201, 201, 201, 409, 409]);
+
+    const catalogBody = await (
+      await fetch(`${baseUrl}/api/v1/catalog?search=GLX-CNC-500X`)
+    ).json();
+    assert.equal(catalogBody.items[0].stock, 2);
+    assert.equal(catalogBody.items[0].reserved, 14);
+
+    const ordersBody = await (await fetch(`${baseUrl}/api/v1/orders`)).json();
+    assert.equal(ordersBody.count, 3);
+  });
+});
+
 test('POST /api/v1/orders/reserve supports optional vat_regime (USN_7, USN_5, EXPORT_0) and validates invalid regimes', async () => {
   await withTestServer({}, async (baseUrl) => {
     // 1. USN_7 regime (7% VAT)
