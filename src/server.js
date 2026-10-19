@@ -67,6 +67,8 @@ export function buildOpenApiSpec(baseUrl = 'http://localhost:4010') {
           operationId: 'reserveOrderStock',
           summary:
             'Validate buyer INN (10/12 digits), lock M-15 warehouse stock, compute 22% VAT (or optional vat_regime: OSNO_22, USN_7, USN_5, EXPORT_0), and issue GOST R 56042-2014 ST00012 QR payload',
+          description:
+            'Order lines are aggregated per SKU before the stock check. If the summed quantity for any SKU exceeds available stock, the whole order is rejected with 409 INSUFFICIENT_STOCK and no stock is reserved. Duplicate SKU lines that fit are merged into a single order item.',
           responses: {
             '201': { description: 'Stock reserved and M-15 order generated' },
             '400': { description: 'Invalid INN or order payload' },
