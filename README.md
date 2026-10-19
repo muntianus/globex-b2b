@@ -67,6 +67,10 @@ curl -X POST http://localhost:4010/api/v1/orders/reserve \
   }'
 ```
 
+### Duplicate SKU Lines
+
+`POST /api/v1/orders/reserve` aggregates `items[]` by SKU before validating warehouse balances. Two lines of 8 units of the same SKU against `stock: 14` are treated as a single demand of 16 and rejected with `409 INSUFFICIENT_STOCK`; no line is locked. When the summed quantity fits, the duplicate lines are merged into one order item with the total quantity.
+
 ## Quick Start
 
 ```bash
