@@ -55,6 +55,34 @@ export function buildOpenApiSpec(baseUrl = 'http://localhost:4010') {
         post: {
           operationId: 'createCatalogSku',
           summary: 'Create a new industrial B2B SKU in the catalog',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['sku', 'name', 'priceNet'],
+                  properties: {
+                    sku: { type: 'string', description: 'Upper-cased on save' },
+                    name: { type: 'string' },
+                    category: { type: 'string', default: 'industrial_general' },
+                    unit: { type: 'string', default: 'шт' },
+                    priceNet: { type: 'number', exclusiveMinimum: 0 },
+                    stock: { type: 'integer', minimum: 0, default: 0 },
+                    reserved: { type: 'integer', minimum: 0, default: 0 },
+                    vatRate: { type: 'number', default: 0.22 },
+                    vatEligible: { type: 'boolean' },
+                    warehouse: { type: 'string', default: 'MSK-NORTH-01' },
+                    gost: { type: 'string' },
+                    minOrderQty: { type: 'integer', minimum: 1, default: 1 },
+                    leadTimeDays: { type: 'integer', minimum: 0, default: 5 },
+                  },
+                },
+                example: { sku: 'GLX-PIPE-219', name: 'Труба 219x8 ГОСТ 8732-78', priceNet: 145000, stock: 40 },
+              },
+            },
+          },
           responses: {
             '201': { description: 'SKU created' },
             '400': { description: 'Validation error' },
@@ -69,6 +97,38 @@ export function buildOpenApiSpec(baseUrl = 'http://localhost:4010') {
             'Validate buyer INN (10/12 digits), lock M-15 warehouse stock, compute 22% VAT (or optional vat_regime: OSNO_22, USN_7, USN_5, EXPORT_0), and issue GOST R 56042-2014 ST00012 QR payload',
           description:
             'Order lines are aggregated per SKU before the stock check. If the summed quantity for any SKU exceeds available stock, the whole order is rejected with 409 INSUFFICIENT_STOCK and no stock is reserved. Duplicate SKU lines that fit are merged into a single order item.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  description: 'Send either `items` or a single `sku` + `quantity`; `inn` / `vatRegime` are accepted aliases.',
+                  properties: {
+                    buyerInn: { type: 'string', pattern: '^(\\d{10}|\\d{12})$' },
+                    inn: { type: 'string' },
+                    buyerName: { type: 'string' },
+                    vat_regime: { type: 'string', enum: ['OSNO_22', 'USN_7', 'USN_5', 'EXPORT_0'], default: 'OSNO_22' },
+                    vatRegime: { type: 'string' },
+                    items: {
+                      type: 'array',
+                      minItems: 1,
+                      items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['sku', 'quantity'],
+                        properties: { sku: { type: 'string' }, quantity: { type: 'integer', minimum: 1 } },
+                      },
+                    },
+                    sku: { type: 'string' },
+                    quantity: { type: 'integer', minimum: 1, default: 1 },
+                  },
+                },
+                example: { buyerInn: '7707083893', vat_regime: 'OSNO_22', items: [{ sku: 'GLX-PIPE-219', quantity: 2 }] },
+              },
+            },
+          },
           responses: {
             '201': { description: 'Stock reserved and M-15 order generated' },
             '400': { description: 'Invalid INN or order payload' },
@@ -161,98 +221,117 @@ function readJsonBody(req) {
   });
 }
 
+function health(req, res) {
+  return sendJson(res, 200, {
+    status: 'ok',
+    service: 'globex-b2b',
+    version: SERVICE_VERSION,
+    upstream: 'https://api.globlex.pro',
+  });
+}
+
+function listCatalog(req, res, url, { store }) {
+  const category = url.searchParams.get('category') || undefined;
+  const search = url.searchParams.get('search') || undefined;
+  const vatOnly = url.searchParams.get('vat_only') || undefined;
+  const items = store.listCatalog({
+    category,
+    search,
+    vat_only: vatOnly,
+  });
+
+  return sendJson(res, 200, {
+    status: 'ok',
+    count: items.length,
+    filters: {
+      category: category || null,
+      search: search || null,
+      vat_only: vatOnly === 'true' || vatOnly === '1',
+    },
+    items,
+  });
+}
+
+async function createCatalogSku(req, res, url, { store }) {
+  const body = await readJsonBody(req);
+  const created = store.createSku(body);
+  return sendJson(res, 201, {
+    status: 'created',
+    item: created,
+  });
+}
+
+async function reserveOrder(req, res, url, { store }) {
+  const body = await readJsonBody(req);
+  const order = store.reserveOrder(body);
+  return sendJson(res, 201, {
+    status: 'reserved',
+    orderId: order.orderId,
+    buyerInn: order.buyer.inn,
+    pricing: order.pricing,
+    paymentQr: order.payment.qrPayload,
+    order,
+  });
+}
+
+function listOrders(req, res, url, { store }) {
+  const orders = store.listOrders();
+  return sendJson(res, 200, {
+    status: 'ok',
+    count: orders.length,
+    orders,
+  });
+}
+
+async function syncGloblex(req, res, url, { store, bridge }) {
+  const catalogItems = store.listCatalog();
+  const orders = store.listOrders();
+  const syncReport = await bridge.syncEcosystem({
+    skuCount: catalogItems.length,
+    reservedOrdersCount: orders.length,
+    totalAvailableUnits: catalogItems.reduce((acc, item) => acc + item.availableStock, 0),
+  });
+  return sendJson(res, 200, syncReport);
+}
+
+function openApiSpec(req, res) {
+  const baseUrl = `http://${req.headers.host || 'localhost:4010'}`;
+  return sendJson(res, 200, buildOpenApiSpec(baseUrl));
+}
+
+/**
+ * Every route the service answers. Handlers get `(req, res, url, ctx)` where
+ * ctx = { store, bridge }. tests/openapi-contract.test.js keeps this table and
+ * the exported docs/api/openapi.json in lockstep.
+ */
+export const ROUTES = [
+  { method: 'GET', path: '/health', handler: health },
+  { method: 'GET', path: '/api/v1/catalog', handler: listCatalog },
+  { method: 'POST', path: '/api/v1/catalog', handler: createCatalogSku },
+  { method: 'POST', path: '/api/v1/orders/reserve', handler: reserveOrder },
+  { method: 'GET', path: '/api/v1/orders', handler: listOrders },
+  { method: 'GET', path: '/api/v1/sync/globlex', handler: syncGloblex },
+  { method: 'GET', path: '/api/v1/openapi.json', handler: openApiSpec },
+];
+
 export function createAppServer(options = {}) {
   const store = options.store || new CatalogStore({ persistPath: options.persistPath });
   const bridge = options.bridge || new GlobexBridge(options.bridgeOptions);
+  const ctx = { store, bridge };
 
   const server = http.createServer(async (req, res) => {
     const method = req.method || 'GET';
-    const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    const pathname = parsedUrl.pathname;
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
     try {
-      if (method === 'GET' && pathname === '/health') {
-        return sendJson(res, 200, {
-          status: 'ok',
-          service: 'globex-b2b',
-          version: SERVICE_VERSION,
-          upstream: 'https://api.globlex.pro',
-        });
+      const route = ROUTES.find((r) => r.method === method && r.path === url.pathname);
+      if (route) {
+        return await route.handler(req, res, url, ctx);
       }
-
-      if (method === 'GET' && pathname === '/api/v1/catalog') {
-        const category = parsedUrl.searchParams.get('category') || undefined;
-        const search = parsedUrl.searchParams.get('search') || undefined;
-        const vatOnly = parsedUrl.searchParams.get('vat_only') || undefined;
-        const items = store.listCatalog({
-          category,
-          search,
-          vat_only: vatOnly,
-        });
-
-        return sendJson(res, 200, {
-          status: 'ok',
-          count: items.length,
-          filters: {
-            category: category || null,
-            search: search || null,
-            vat_only: vatOnly === 'true' || vatOnly === '1',
-          },
-          items,
-        });
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/catalog') {
-        const body = await readJsonBody(req);
-        const created = store.createSku(body);
-        return sendJson(res, 201, {
-          status: 'created',
-          item: created,
-        });
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/orders/reserve') {
-        const body = await readJsonBody(req);
-        const order = store.reserveOrder(body);
-        return sendJson(res, 201, {
-          status: 'reserved',
-          orderId: order.orderId,
-          buyerInn: order.buyer.inn,
-          pricing: order.pricing,
-          paymentQr: order.payment.qrPayload,
-          order,
-        });
-      }
-
-      if (method === 'GET' && pathname === '/api/v1/orders') {
-        const orders = store.listOrders();
-        return sendJson(res, 200, {
-          status: 'ok',
-          count: orders.length,
-          orders,
-        });
-      }
-
-      if (method === 'GET' && pathname === '/api/v1/sync/globlex') {
-        const catalogItems = store.listCatalog();
-        const orders = store.listOrders();
-        const syncReport = await bridge.syncEcosystem({
-          skuCount: catalogItems.length,
-          reservedOrdersCount: orders.length,
-          totalAvailableUnits: catalogItems.reduce((acc, item) => acc + item.availableStock, 0),
-        });
-        return sendJson(res, 200, syncReport);
-      }
-
-      if (method === 'GET' && pathname === '/api/v1/openapi.json') {
-        const baseUrl = `http://${req.headers.host || 'localhost:4010'}`;
-        return sendJson(res, 200, buildOpenApiSpec(baseUrl));
-      }
-
       return sendJson(res, 404, {
         status: 'error',
         error: 'NOT_FOUND',
-        message: `Route ${method} ${pathname} not found`,
+        message: `Route ${method} ${url.pathname} not found`,
       });
     } catch (err) {
       const statusCode = Number(err?.statusCode) || 500;

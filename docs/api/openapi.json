@@ -1,0 +1,304 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Globex B2B Inventory, Order & Ecosystem SLO Sync API",
+    "version": "1.2.0",
+    "description": "High-throughput B2B e-commerce catalog, M-15 warehouse stock reservation, 2026 Russian VAT 22% calculation (with optional vat_regime: OSNO_22, USN_7, USN_5, EXPORT_0), GOST ST00012 payment QR generation, and live ecosystem SLO bridge for globlex.pro, globlex.shop, globlex.online, launchgate-core, and aco.perfops.shop.",
+    "contact": {
+      "name": "PerfOps Engineering",
+      "url": "https://globlex.pro"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:4010",
+      "description": "Local / Microservice Runtime"
+    },
+    {
+      "url": "https://api.globlex.pro",
+      "description": "Globex Production API"
+    }
+  ],
+  "x-perfops-integrations": {
+    "upstream": "https://api.globlex.pro",
+    "domains": [
+      "https://globlex.pro",
+      "https://globlex.shop",
+      "https://globlex.online"
+    ],
+    "consumers": [
+      "globex",
+      "launchgate-core",
+      "aco.perfops.shop"
+    ]
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Service health check and upstream binding",
+        "responses": {
+          "200": {
+            "description": "Service is healthy"
+          }
+        }
+      }
+    },
+    "/api/v1/catalog": {
+      "get": {
+        "operationId": "listCatalog",
+        "summary": "List B2B industrial catalog SKUs with category, search, and VAT filtering",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "vat_only",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filtered B2B catalog list"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCatalogSku",
+        "summary": "Create a new industrial B2B SKU in the catalog",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sku",
+                  "name",
+                  "priceNet"
+                ],
+                "properties": {
+                  "sku": {
+                    "type": "string",
+                    "description": "Upper-cased on save"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string",
+                    "default": "industrial_general"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "default": "шт"
+                  },
+                  "priceNet": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "stock": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  },
+                  "reserved": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  },
+                  "vatRate": {
+                    "type": "number",
+                    "default": 0.22
+                  },
+                  "vatEligible": {
+                    "type": "boolean"
+                  },
+                  "warehouse": {
+                    "type": "string",
+                    "default": "MSK-NORTH-01"
+                  },
+                  "gost": {
+                    "type": "string"
+                  },
+                  "minOrderQty": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  },
+                  "leadTimeDays": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 5
+                  }
+                }
+              },
+              "example": {
+                "sku": "GLX-PIPE-219",
+                "name": "Труба 219x8 ГОСТ 8732-78",
+                "priceNet": 145000,
+                "stock": 40
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "SKU created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "409": {
+            "description": "Duplicate SKU"
+          }
+        }
+      }
+    },
+    "/api/v1/orders/reserve": {
+      "post": {
+        "operationId": "reserveOrderStock",
+        "summary": "Validate buyer INN (10/12 digits), lock M-15 warehouse stock, compute 22% VAT (or optional vat_regime: OSNO_22, USN_7, USN_5, EXPORT_0), and issue GOST R 56042-2014 ST00012 QR payload",
+        "description": "Order lines are aggregated per SKU before the stock check. If the summed quantity for any SKU exceeds available stock, the whole order is rejected with 409 INSUFFICIENT_STOCK and no stock is reserved. Duplicate SKU lines that fit are merged into a single order item.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Send either `items` or a single `sku` + `quantity`; `inn` / `vatRegime` are accepted aliases.",
+                "properties": {
+                  "buyerInn": {
+                    "type": "string",
+                    "pattern": "^(\\d{10}|\\d{12})$"
+                  },
+                  "inn": {
+                    "type": "string"
+                  },
+                  "buyerName": {
+                    "type": "string"
+                  },
+                  "vat_regime": {
+                    "type": "string",
+                    "enum": [
+                      "OSNO_22",
+                      "USN_7",
+                      "USN_5",
+                      "EXPORT_0"
+                    ],
+                    "default": "OSNO_22"
+                  },
+                  "vatRegime": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "sku",
+                        "quantity"
+                      ],
+                      "properties": {
+                        "sku": {
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  },
+                  "sku": {
+                    "type": "string"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  }
+                }
+              },
+              "example": {
+                "buyerInn": "7707083893",
+                "vat_regime": "OSNO_22",
+                "items": [
+                  {
+                    "sku": "GLX-PIPE-219",
+                    "quantity": 2
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stock reserved and M-15 order generated"
+          },
+          "400": {
+            "description": "Invalid INN or order payload"
+          },
+          "404": {
+            "description": "SKU not found"
+          },
+          "409": {
+            "description": "Insufficient warehouse stock"
+          }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "get": {
+        "operationId": "listOrders",
+        "summary": "List reserved B2B orders and M-15 stock locks",
+        "responses": {
+          "200": {
+            "description": "Order list"
+          }
+        }
+      }
+    },
+    "/api/v1/sync/globlex": {
+      "get": {
+        "operationId": "syncGloblexEcosystem",
+        "summary": "Probe https://api.globlex.pro/health and /enterprise/overview with latency SLO metrics and deterministic fallback",
+        "responses": {
+          "200": {
+            "description": "Ecosystem sync telemetry and SLO report"
+          }
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenApiSpec",
+        "summary": "OpenAPI 3.1 contract",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 JSON document"
+          }
+        }
+      }
+    }
+  }
+}
