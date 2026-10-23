@@ -84,6 +84,17 @@ npm run smoke
 npm start
 ```
 
+## API contract, CI & deploy
+
+- **Contract:** [`docs/api/openapi.json`](docs/api/openapi.json) (OpenAPI 3.1).
+  `tests/openapi-contract.test.js` fails when `ROUTES` in `src/server.js` and the spec disagree.
+- **Tests:** `npm test` — Node's built-in runner, no dependencies. CI runs it on every pull request;
+  GitGuardian scans each one for secrets.
+- **Config:** every environment variable is listed in [`.env.example`](.env.example).
+- **Deploy:** `docker build -t globex-b2b . && docker run -p 4010:4010 globex-b2b` — `node:22-alpine`,
+  non-root, `HEALTHCHECK` on `GET /health`. The portfolio port map lives in
+  [`muntianus/architecture`](https://github.com/muntianus/architecture).
+
 ## PerfOps ecosystem contact
 
 General PerfOps engineering contact: [@perfops_ai_manager](https://t.me/perfops_ai_manager). Product-specific operational alerts, trading bots, private credentials and vulnerability reports continue to use their existing dedicated channels.

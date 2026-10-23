@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test tests/*.test.js",
-    "smoke": "node --test tests/globex-b2b.test.js"
+    "smoke": "node --test tests/globex-b2b.test.js",
+    "openapi": "node scripts/export-openapi.js"
   }
 }
